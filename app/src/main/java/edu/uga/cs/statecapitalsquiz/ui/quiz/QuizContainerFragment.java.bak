@@ -1,0 +1,159 @@
+package edu.uga.cs.statecapitalsquiz.ui.quiz;
+import edu.uga.cs.statecapitalsquiz.ui.quiz.QuizPagerAdapter;
+import edu.uga.cs.statecapitalsquiz.ui.quiz.QuizViewModel;
+
+
+import android.os.Bundle;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.navigation.Navigation;
+import androidx.viewpager2.widget.ViewPager2;
+
+import edu.uga.cs.statecapitalsquiz.R;
+
+/**
+ * QuizContainerFragment
+ *
+ * <p><b>Purpose:</b> Hosts the swipeable quiz experience using {@link androidx.viewpager2.widget.ViewPager2}.
+ * It shows 6 question pages (one per fragment) and displays a bottom progress indicator with an optional
+ * “Finish Quiz” button on the last page.</p>
+ *
+ * <p><b>Key responsibilities:</b></p>
+ * <ul>
+ *   <li>Create and attach {@link QuizPagerAdapter} to a {@link androidx.viewpager2.widget.ViewPager2}.</li>
+ *   <li>Persist and restore the current page position across configuration changes (rotation).</li>
+ *   <li>Display “Question X of 6” progress text; show/hide the “Finish” button on last page.</li>
+ *   <li>When Finish is pressed:
+ *     <ul>
+ *       <li>If some answers are missing, show a confirmation dialog.</li>
+ *       <li>Otherwise, navigate to {@code ResultsFragment}.</li>
+ *     </ul>
+ *   </li>
+ *   <li>Share a {@link QuizViewModel} with question pages to count unanswered questions.</li>
+ * </ul>
+ *
+ * <p><b>Why a container?</b> Separating the pager container from question pages keeps concerns clear:
+ * this fragment manages navigation, progress UI, and finish validation; each page only manages its own UI.</p>
+ *
+ * <p><b>Future work:</b> When database integration is added, this fragment can initialize a “current quiz,”
+ * load generated questions, and save per-question responses on pause/resume.</p>
+ */
+public class QuizContainerFragment extends Fragment {
+
+    private static final int QUESTION_COUNT = 6;
+
+    private ViewPager2 viewPager;
+    private TextView tvProgress;
+    private Button btnFinish;
+
+    private static final String STATE_CURRENT_POS = "state_current_pos";
+    private int restoredPosition = 0;
+
+    private QuizViewModel quizViewModel;
+
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater,
+                             @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
+        return inflater.inflate(R.layout.fragment_quiz_container, container, false);
+    }
+
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+
+
+        quizViewModel = new ViewModelProvider(requireActivity()).get(QuizViewModel.class);
+        loadQuizData();
+
+        viewPager = view.findViewById(R.id.viewPager);
+        tvProgress = view.findViewById(R.id.tvProgress);
+        btnFinish = view.findViewById(R.id.btnFinish);
+
+        QuizPagerAdapter adapter = new QuizPagerAdapter(this, QUESTION_COUNT);
+        viewPager.setAdapter(adapter);
+
+        // move to previously saved page (if any)
+        viewPager.post(() -> {
+            viewPager.setCurrentItem(restoredPosition, false);
+            updateUiForPosition(restoredPosition);
+        });
+
+        // initial state
+        updateUiForPosition(0);
+
+        viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                super.onPageSelected(position);
+                updateUiForPosition(position);
+            }
+        });
+
+        btnFinish.setOnClickListener(v -> {
+            int unanswered = countUnanswered();     // <-- add
+            if (unanswered == 0) {
+                // all answered: go straight to results
+                Navigation.findNavController(v).navigate(R.id.action_quiz_to_results);
+            } else {
+                // show confirm dialog
+                new AlertDialog.Builder(requireContext())
+                        .setTitle("Finish Quiz?")
+                        .setMessage("You have " + unanswered + " unanswered "
+                                + (unanswered == 1 ? "question." : "questions.")
+                                + " Do you want to finish anyway?")
+                        .setPositiveButton("Finish anyway", (d, w) ->
+                                Navigation.findNavController(v).navigate(R.id.action_quiz_to_results))
+                        .setNegativeButton("Keep answering", null)
+                        .show();
+            }
+        });
+    }
+
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            restoredPosition = savedInstanceState.getInt(STATE_CURRENT_POS, 0);
+        }
+
+        quizViewModel = new ViewModelProvider(requireActivity()).get(QuizViewModel.class);
+    }
+
+    private void updateUiForPosition(int position) {
+        String progress = "Question " + (position + 1) + " of " + QUESTION_COUNT;
+        tvProgress.setText(progress);
+        btnFinish.setVisibility(position == QUESTION_COUNT - 1 ? View.VISIBLE : View.GONE);
+    }
+
+    @Override
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (viewPager != null) {
+            outState.putInt(STATE_CURRENT_POS, viewPager.getCurrentItem());
+        }
+    }
+
+    private int countUnanswered() {                 // <-- add
+        int unanswered = 0;
+        for (int q = 1; q <= QUESTION_COUNT; q++) {
+            if (quizViewModel.getSelection(q) == 0) unanswered++;
+        }
+        return unanswered;
+    }
+}
+
+
+
